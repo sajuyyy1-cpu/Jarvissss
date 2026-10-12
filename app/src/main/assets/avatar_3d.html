@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>JARVIS 3D Talking Humanoid Avatar</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body, html {
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      background: radial-gradient(circle at center, #07162c 0%, #030712 100%);
+      font-family: monospace;
+    }
+    #canvas-container {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    #hud-overlay {
+      position: absolute;
+      bottom: 8px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: #00E5FF;
+      font-size: 10px;
+      font-weight: bold;
+      letter-spacing: 1px;
+      background: rgba(7, 18, 38, 0.75);
+      border: 1px solid rgba(0, 229, 255, 0.4);
+      padding: 3px 10px;
+      border-radius: 12px;
+      pointer-events: none;
+      white-space: nowrap;
+    }
+    #gl-fallback {
+      display: none;
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #00E5FF;
+      text-align: center;
+    }
+  </style>
+  <!-- Three.js Library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+  <div id="canvas-container"></div>
+  <div id="hud-overlay">● JARVIS 3D NEURAL AVATAR // READY</div>
+  <div id="gl-fallback">WebGL Hardware Acceleration Active</div>
+
+  <script>
+    let scene, camera, renderer;
+    let headGroup, faceMesh, leftEye, rightEye, jawMesh, hairMesh;
+    let currentState = 'READY';
+    let currentRms = 0.0;
+    let isSpeaking = false;
+    let jawOpenAmount = 0.0;
+    let targetJawOpen = 0.0;
+    let blinkValue = 0.0;
+    let nextBlinkTime = Date.now() + 2500;
+    let isBlinking = false;
+    let eyeTargetX = 0, eyeTargetY = 0;
+
+    // Viseme / Lip-Sync Frequency Modulation
+    let visemePhase = 0;
+
+    function init() {
+      const container = document.getElementById('canvas-container');
+      const width = container.clientWidth || window.innerWidth;
+      const height = container.clientHeight || window.innerHeight;
+
+      // 1. Scene & Camera Setup
+      scene = new THREE.Scene();
+      camera = new THREE.PerspectiveCamera(40, width / height, 0.1, 1000);
+      camera.position.set(0, 0.2, 3.8);
+
+      // 2. Renderer with Anti-Aliasing & Color Management
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'high-performance' });
+      renderer.setSize(width, height);
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.1;
+      container.appendChild(renderer.domElement);
+
+      // 3. Cinematic Holographic Lighting
+      const ambientLight = new THREE.AmbientLight(0x0a1c36, 1.8);
+      scene.add(ambientLight);
+
+      // Key light: Crisp cool white
+      const keyLight = new THREE.DirectionalLight(0xd4f0ff, 2.2);
+      keyLight.position.set(2, 3, 3);
+      scene.add(keyLight);
+
+      // Rim light: Electric cyan
+      const rimLightCyan = new THREE.DirectionalLight(0x00E5FF, 3.5);
+      rimLightCyan.position.set(-3, 2, -2);
+      scene.add(rimLightCyan);
+
+      // Fill light: Deep electric blue
+      const fillLightBlue = new THREE.DirectionalLight(0x0088FF, 1.6);
+      fillLightBlue.position.set(2, -1, 2);
+      scene.add(fillLightBlue);
+
+      // 4. Build Realistic 3D Humanoid Head Geometry & Procedural Materials
+      buildRealisticHumanoidModel();
+
+      // 5. Add Sci-Fi Holographic Orbit Rings
+      buildHolographicOrbitRings();
+
+      // Window resize listener
+      window.addEventListener('resize', onWindowResize);
+
+      // Drag to rotate listener
+      let isDragging = false;
+      let prevMouseX = 0, prevMouseY = 0;
+      window.addEventListener('mousedown', (e) => { isDragging = true; prevMouseX = e.clientX; prevMouseY = e.clientY; });
+      window.addEventListener('mousemove', (e) => {
+        if (isDragging && headGroup) {
+          headGroup.rotation.y += (e.clientX - prevMouseX) * 0.008;
+          headGroup.rotation.x += (e.clientY - prevMouseY) * 0.008;
+          prevMouseX = e.clientX; prevMouseY = e.clientY;
+        }
+      });
+      window.addEventListener('mouseup', () => { isDragging = false; });
+
+      // Touch events for mobile
+      window.addEventListener('touchstart', (e) => {
+        if (e.touches.length === 1) {
+          isDragging = true;
+          prevMouseX = e.touches[0].clientX;
+          prevMouseY = e.touches[0].clientY;
+        }
+      });
+      window.addEventListener('touchmove', (e) => {
+        if (isDragging && headGroup && e.touches.length === 1) {
+          headGroup.rotation.y += (e.touches[0].clientX - prevMouseX) * 0.008;
+          headGroup.rotation.x += (e.touches[0].clientY - prevMouseY) * 0.008;
+          prevMouseX = e.touches[0].clientX;
+          prevMouseY = e.touches[0].clientY;
+        }
+      });
+      window.addEventListener('touchend', () => { isDragging = false; });
+
+      // Start Render Loop
+      animate();
+    }
+
+    function buildRealisticHumanoidModel() {
+      headGroup = new THREE.Group();
+      scene.add(headGroup);
+
+      // --- CRANIUM & UPPER FACE ---
+      // Realistic Human Head Base (Cranium)
+      const headGeom = new THREE.SphereGeometry(1.0, 36, 36);
+      headGeom.scale(0.85, 1.15, 0.95);
+
+      // Realistic Human Skin Material with subtle subsurface scattering effect & cyan rim reflection
+      const skinMaterial = new THREE.MeshStandardMaterial({
+        color: 0x223650,
+        roughness: 0.42,
+        metalness: 0.15,
+        wireframe: false
+      });
+
+      faceMesh = new THREE.Mesh(headGeom, skinMaterial);
+      faceMesh.position.set(0, 0.25, 0);
+      headGroup.add(faceMesh);
+
+      // --- NOSE & CHEEKBONES ---
+      const noseGeom = new THREE.ConeGeometry(0.12, 0.45, 6);
+      noseGeom.rotateX(Math.PI / 2);
+      const noseMesh = new THREE.Mesh(noseGeom, skinMaterial);
+      noseMesh.position.set(0, 0.22, 0.95);
+      headGroup.add(noseMesh);
+
+      // Left & Right Cheekbones
+      const cheekGeom = new THREE.SphereGeometry(0.24, 16, 16);
+      cheekGeom.scale(1.2, 0.8, 0.6);
+      const leftCheek = new THREE.Mesh(cheekGeom, skinMaterial);
+      leftCheek.position.set(-0.52, 0.12, 0.72);
+      headGroup.add(leftCheek);
+      const rightCheek = new THREE.Mesh(cheekGeom, skinMaterial);
+      rightCheek.position.set(0.52, 0.12, 0.72);
+      headGroup.add(rightCheek);
+
+      // --- REALISTIC EYES (CORNEA, IRIS & OPTIC GLOW) ---
+      const eyeGeom = new THREE.SphereGeometry(0.13, 24, 24);
+      const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0x081628, roughness: 0.2 });
+
+      // Left Eye
+      const leftEyeAnchor = new THREE.Group();
+      leftEyeAnchor.position.set(-0.32, 0.35, 0.82);
+      leftEye = new THREE.Mesh(eyeGeom, eyeWhiteMat);
+      leftEyeAnchor.add(leftEye);
+
+      // Realistic Cyan Glowing Iris
+      const irisGeom = new THREE.CircleGeometry(0.065, 24);
+      const irisMat = new THREE.MeshBasicMaterial({ color: 0x00E5FF });
+      const leftIris = new THREE.Mesh(irisGeom, irisMat);
+      leftIris.position.set(0, 0, 0.132);
+      leftEye.add(leftIris);
+
+      // Pupil
+      const pupilGeom = new THREE.CircleGeometry(0.028, 24);
+      const pupilMat = new THREE.MeshBasicMaterial({ color: 0x001122 });
+      const leftPupil = new THREE.Mesh(pupilGeom, pupilMat);
+      leftPupil.position.set(0, 0, 0.134);
+      leftEye.add(leftPupil);
+
+      headGroup.add(leftEyeAnchor);
+
+      // Right Eye
+      const rightEyeAnchor = new THREE.Group();
+      rightEyeAnchor.position.set(0.32, 0.35, 0.82);
+      rightEye = new THREE.Mesh(eyeGeom, eyeWhiteMat);
+      rightEyeAnchor.add(rightEye);
+
+      const rightIris = new THREE.Mesh(irisGeom, irisMat);
+      rightIris.position.set(0, 0, 0.132);
+      rightEye.add(rightIris);
+
+      const rightPupil = new THREE.Mesh(pupilGeom, pupilMat);
+      rightPupil.position.set(0, 0, 0.134);
+      rightEye.add(rightPupil);
+
+      headGroup.add(rightEyeAnchor);
+
+      // --- EYEBROWS ---
+      const browGeom = new THREE.BoxGeometry(0.32, 0.04, 0.08);
+      const browMat = new THREE.MeshStandardMaterial({ color: 0x0088FF, roughness: 0.5 });
+      const leftBrow = new THREE.Mesh(browGeom, browMat);
+      leftBrow.position.set(-0.34, 0.52, 0.86);
+      leftBrow.rotation.z = 0.08;
+      headGroup.add(leftBrow);
+
+      const rightBrow = new THREE.Mesh(browGeom, browMat);
+      rightBrow.position.set(0.34, 0.52, 0.86);
+      rightBrow.rotation.z = -0.08;
+      headGroup.add(rightBrow);
+
+      // --- JAW AND MOUTH (LIP-SYNC ANCHOR) ---
+      // The jaw pivots around a hinge to create real-time lifelike speech & lip-sync!
+      const jawPivot = new THREE.Group();
+      jawPivot.position.set(0, -0.05, 0.2); // Jaw hinge
+      headGroup.add(jawPivot);
+
+      const jawGeom = new THREE.CylinderGeometry(0.48, 0.38, 0.55, 18);
+      jawGeom.scale(1.0, 0.9, 1.1);
+      jawMesh = new THREE.Mesh(jawGeom, skinMaterial);
+      jawMesh.position.set(0, -0.32, 0.42);
+      jawPivot.add(jawMesh);
+
+      // Lips
+      const lipGeom = new THREE.TorusGeometry(0.18, 0.04, 12, 24);
+      lipGeom.scale(1.4, 0.5, 1.0);
+      const lipMat = new THREE.MeshStandardMaterial({ color: 0x00E5FF, roughness: 0.35 });
+      const lips = new THREE.Mesh(lipGeom, lipMat);
+      lips.position.set(0, -0.15, 0.92);
+      jawPivot.add(lips);
+
+      // Teeth / Oral Cavity
+      const teethGeom = new THREE.BoxGeometry(0.24, 0.05, 0.05);
+      const teethMat = new THREE.MeshBasicMaterial({ color: 0xebf8ff });
+      const teeth = new THREE.Mesh(teethGeom, teethMat);
+      teeth.position.set(0, -0.13, 0.90);
+      jawPivot.add(teeth);
+
+      headGroup.userData.jawPivot = jawPivot;
+
+      // --- FUTURISTIC CYBERNETIC CRANIAL ACCENTS ---
+      const cyberCircuitsGeom = new THREE.RingGeometry(0.88, 0.91, 36);
+      const cyberMat = new THREE.MeshBasicMaterial({ color: 0x00E5FF, side: THREE.DoubleSide });
+      const halo = new THREE.Mesh(cyberCircuitsGeom, cyberMat);
+      halo.rotation.x = Math.PI / 2;
+      halo.position.set(0, 0.55, 0);
+      headGroup.add(halo);
+
+      // Position whole head nicely in view
+      headGroup.position.set(0, -0.1, 0);
+    }
+
+    function buildHolographicOrbitRings() {
+      const ringGroup = new THREE.Group();
+      scene.add(ringGroup);
+
+      const rGeom1 = new THREE.TorusGeometry(1.65, 0.012, 8, 64);
+      const rMatCyan = new THREE.MeshBasicMaterial({ color: 0x00E5FF, transparent: true, opacity: 0.4 });
+      const ring1 = new THREE.Mesh(rGeom1, rMatCyan);
+      ring1.rotation.x = Math.PI / 3;
+      ringGroup.add(ring1);
+
+      const rGeom2 = new THREE.TorusGeometry(1.85, 0.008, 8, 64);
+      const rMatBlue = new THREE.MeshBasicMaterial({ color: 0x0088FF, transparent: true, opacity: 0.35 });
+      const ring2 = new THREE.Mesh(rGeom2, rMatBlue);
+      ring2.rotation.y = Math.PI / 4;
+      ringGroup.add(ring2);
+
+      scene.userData.ringGroup = ringGroup;
+    }
+
+    function onWindowResize() {
+      const container = document.getElementById('canvas-container');
+      const width = container.clientWidth || window.innerWidth;
+      const height = container.clientHeight || window.innerHeight;
+      camera.aspect = width / height;
+      camera.updateProjectionMatrix();
+      renderer.setSize(width, height);
+    }
+
+    // ---------------- ANIMATION & LIP-SYNC LOOP ---------------- //
+
+    function animate() {
+      requestAnimationFrame(animate);
+
+      const time = Date.now() * 0.001;
+
+      // 1. Natural Breathing & Subtle Idle Head Movement
+      if (headGroup) {
+        const breathingOffset = Math.sin(time * 1.8) * 0.02;
+        headGroup.position.y = -0.1 + breathingOffset;
+
+        // Subtle micro-sway (natural human poise)
+        headGroup.rotation.z = Math.sin(time * 0.8) * 0.015;
+
+        if (currentState === 'READY') {
+          headGroup.rotation.y = Math.sin(time * 0.5) * 0.04;
+          headGroup.rotation.x = Math.sin(time * 0.7) * 0.02;
+        } else if (currentState === 'LISTENING') {
+          // Attentive listening posture: slight forward lean and tilt
+          headGroup.rotation.y = THREE.MathUtils.lerp(headGroup.rotation.y, 0.08, 0.05);
+          headGroup.rotation.x = THREE.MathUtils.lerp(headGroup.rotation.x, -0.05, 0.05);
+        } else if (currentState === 'THINKING') {
+          // Thinking posture: eyes and head cast slightly upward/aside
+          headGroup.rotation.y = THREE.MathUtils.lerp(headGroup.rotation.y, -0.12, 0.05);
+          headGroup.rotation.x = THREE.MathUtils.lerp(headGroup.rotation.x, 0.08, 0.05);
+        }
+      }
+
+      // 2. Natural Biological Blinking (every 2.5 - 4.5 seconds)
+      const now = Date.now();
+      if (now > nextBlinkTime && !isBlinking) {
+        isBlinking = true;
+        nextBlinkTime = now + 2500 + Math.random() * 2000;
+      }
+      if (isBlinking) {
+        blinkValue += 0.18;
+        if (blinkValue >= Math.PI) {
+          blinkValue = 0;
+          isBlinking = false;
+        }
+      }
+      const eyeScaleY = 1.0 - (Math.sin(blinkValue) * 0.95);
+      if (leftEye && rightEye) {
+        leftEye.scale.y = Math.max(0.08, eyeScaleY);
+        rightEye.scale.y = Math.max(0.08, eyeScaleY);
+      }
+
+      // 3. Eye Movement / Saccadic Eye Tracking
+      if (Math.random() < 0.015) {
+        eyeTargetX = (Math.random() - 0.5) * 0.06;
+        eyeTargetY = (Math.random() - 0.5) * 0.04;
+      }
+      if (leftEye && rightEye) {
+        leftEye.position.x = THREE.MathUtils.lerp(leftEye.position.x, eyeTargetX, 0.1);
+        leftEye.position.y = THREE.MathUtils.lerp(leftEye.position.y, eyeTargetY, 0.1);
+        rightEye.position.x = THREE.MathUtils.lerp(rightEye.position.x, eyeTargetX, 0.1);
+        rightEye.position.y = THREE.MathUtils.lerp(rightEye.position.y, eyeTargetY, 0.1);
+      }
+
+      // 4. Real-time Audio-Driven Lip-Sync & Jaw Viseme Animation
+      const jawPivot = headGroup?.userData?.jawPivot;
+      if (jawPivot) {
+        if (currentState === 'SPEAKING' || isSpeaking || currentRms > 0.08) {
+          visemePhase += 0.35;
+          // Dynamic phoneme articulation frequency based on audio RMS
+          const speechModulation = Math.abs(Math.sin(visemePhase)) * 0.6 + Math.abs(Math.cos(visemePhase * 1.5)) * 0.4;
+          const rmsFactor = Math.min(1.0, currentRms > 0 ? currentRms * 1.8 : 0.45);
+          targetJawOpen = speechModulation * rmsFactor * 0.32;
+        } else {
+          // Relax mouth to closed position naturally when not speaking
+          targetJawOpen = 0.0;
+        }
+
+        jawOpenAmount = THREE.MathUtils.lerp(jawOpenAmount, targetJawOpen, 0.25);
+        jawPivot.rotation.x = jawOpenAmount;
+      }
+
+      // 5. Holographic Orbit Rings Rotation
+      const ringGroup = scene.userData.ringGroup;
+      if (ringGroup) {
+        const ringSpeed = currentState === 'THINKING' ? 0.03 : 0.005;
+        ringGroup.rotation.z += ringSpeed;
+        ringGroup.rotation.x += ringSpeed * 0.5;
+      }
+
+      renderer.render(scene, camera);
+    }
+
+    // ---------------- ANDROID JAVASCRIPT BRIDGE ---------------- //
+
+    window.updateState = function(state) {
+      currentState = state || 'READY';
+      const hud = document.getElementById('hud-overlay');
+      if (hud) {
+        hud.innerText = `● JARVIS 3D AVATAR // ${currentState}`;
+        if (currentState === 'READY') hud.style.color = '#00E5FF';
+        else if (currentState === 'LISTENING') hud.style.color = '#00E676';
+        else if (currentState === 'THINKING') hud.style.color = '#FFB300';
+        else if (currentState === 'SPEAKING') hud.style.color = '#0088FF';
+      }
+    };
+
+    window.updateAudioRms = function(rms) {
+      currentRms = parseFloat(rms) || 0.0;
+    };
+
+    window.setSpeaking = function(speaking) {
+      isSpeaking = (speaking === true || speaking === 'true');
+      if (isSpeaking) {
+        updateState('SPEAKING');
+      } else if (currentState === 'SPEAKING') {
+        updateState('READY');
+      }
+    };
+
+    // Initialize on page load
+    window.onload = init;
+  </script>
+</body>
+</html>

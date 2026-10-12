@@ -1,0 +1,6 @@
+{
+  "name": "JARVIS AI",
+  "description": "Futuristic personal AI assistant with voice interaction, 3D cybernetic core, persistent memory, tasks, system tools, and business management.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
